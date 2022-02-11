@@ -3,7 +3,7 @@
 ; General variables.
 globals
 [ percent-of-contributors     ; The current percent of agents that are contributors.
-  effort ]                    ; Agents need effort to provide prosocial common-pool behavior and withstand pressure. The constant sets a limit to how much prosocial common-pool behavior an agent can contribute in a group and there is a 1:1 relationship between the two.
+  effort]                    ; Agents need effort to provide prosocial common-pool behavior and withstand pressure. The constant sets a limit to how much prosocial common-pool behavior an agent can contribute in a group and there is a 1:1 relationship between the two.
 
 ; Agent-specific variables.
 turtles-own
@@ -55,7 +55,20 @@ to potentially-changing-behavior
   ask turtles
   [
     if (agent-benefit self) <= pressure
-    [ toggle-behavior ]
+    [
+      ifelse use-behavior-bias [
+        ; pressure is sufficient, but decision to change behavior depends on prosocial bias
+        let probability (prosocial-bias self)
+        if (is-contributing self)
+        [ ; invert chance to represent likelihood of becoming non-contributor
+          set probability (1.0 - probability)
+        ]
+        if random-float 1 < probability
+        [ toggle-behavior ]
+      ]
+      ; not probabistic - always toggle under pressure:
+      [ toggle-behavior ]
+    ]
   ]
 end
 
@@ -69,14 +82,26 @@ to-report agent-benefit [turtle1]
   let contributorCount count turtles in-radius 1.5 with [ contribution = effort ]
   ifelse ( groupSize = 1 )
   [ report effort ]
-  [ ifelse (contribution = effort)
+  [ ifelse (is-contributing self)
     [ report synergy * effort * contributorCount / groupSize ]
     [ report effort + synergy * effort * contributorCount / groupSize ]
   ]
 end
 
+to-report prosocial-bias [turtle1]
+  let individualBias (prosociality + 3) / 5.0
+  ; for now that's all we use; later we'll add group influence
+  report individualBias
+end
+
+to-report is-contributing [turtle1]
+  ifelse contribution = effort
+  [ report true ]
+  [ report false ]
+end
+
 to toggle-behavior
-   ifelse color = orange
+  ifelse (is-contributing self)
    [ set color blue
      set contribution 0 ]
    [ set color orange
@@ -123,7 +148,7 @@ density
 density
 0
 1
-0.3
+0.6
 .1
 1
 NIL
@@ -138,7 +163,7 @@ initial-percent-of-contributors
 initial-percent-of-contributors
 0
 100
-30.0
+20.0
 1
 1
 %
@@ -237,7 +262,7 @@ synergy
 synergy
 0
 10
-8.0
+2.0
 .1
 1
 NIL
@@ -252,7 +277,7 @@ pressure
 pressure
 0
 10
-7.0
+3.5
 .1
 1
 NIL
@@ -286,6 +311,17 @@ ticks
 17
 1
 11
+
+SWITCH
+17
+252
+198
+285
+use-behavior-bias
+use-behavior-bias
+0
+1
+-1000
 
 @#$#@#$#@
 ## WHAT IS IT?
