@@ -60,7 +60,7 @@ to potentially-changing-behavior
         ; pressure is sufficient, but decision to change behavior depends on prosocial bias
         let probability (prosocial-bias self)
         if (is-contributing self)
-        [ ; invert chance to represent likelihood of becoming non-contributor
+        [ ; invert probability to represent likelihood of becoming non-contributor
           set probability (1.0 - probability)
         ]
         if random-float 1 < probability
@@ -89,8 +89,10 @@ to-report agent-benefit [turtle1]
 end
 
 to-report prosocial-bias [turtle1]
-  let individualBias (prosociality + 3) / 5.0
-  ; for now that's all we use; later we'll add group influence
+  ; map individual prosociality from range [-2, 2] to unit bias range [0.1, 0.9]
+  let individualBias (prosociality + 2.5) / 5.0
+
+  ; for now individual bias is all we use; later we'll add group influence
   report individualBias
 end
 
