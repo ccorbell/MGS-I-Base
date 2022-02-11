@@ -7,7 +7,9 @@ globals
 
 ; Agent-specific variables.
 turtles-own
-[ contribution ]              ; A dynamic categorical (effort or 0) variable indicating the amount an agent contributes to a group.
+[ contribution ; A dynamic categorical (effort or 0) variable indicating the amount an agent contributes to a group.
+  prosociality ; A integer from -2 to 2; 0 is neutral, 2 is strong-prosocial, -2 is strong-non-prosocial
+]
 
 ; Initialize the model with the parameter settings in the user interface.
 to setup
@@ -17,7 +19,8 @@ to setup
   [ set pcolor black
     if count turtles < ( density * 4 * max-pxcor * max-pycor ) [ sprout 1 [set size 1] ] ] ; Use the number of patches and density to distribute agents.
   ask turtles
-  [ ifelse count turtles with [ contribution = effort ] < ( initial-percent-of-contributors / 100 * count turtles ) ; Use the initial percent of contributors to assign initial agent type.
+  [ set prosociality (random 5) - 2 ; for now we just have uniform distrution across prosocial preference range
+    ifelse count turtles with [ contribution = effort ] < ( initial-percent-of-contributors / 100 * count turtles ) ; Use the initial percent of contributors to assign initial agent type.
     [ set color orange
       set contribution effort ]
     [ set color blue
@@ -41,32 +44,19 @@ end
 ; Agents who are not able to withstand pressure move to one of the closest spots.
 to potentially-moving
   ask turtles
-  [ ifelse contribution = effort
-    [ if ( synergy * effort * count turtles in-radius 1.5 with [ contribution = effort ] / count turtles in-radius 1.5 ) <= pressure
-      [ move-to min-one-of patches with [ not any? turtles-here ] [ distance myself ] ] ]
-    [ if ( effort + synergy * effort * count turtles in-radius 1.5 with [ contribution = effort ] / count turtles in-radius 1.5 ) <= pressure
-      [ move-to min-one-of patches with [ not any? turtles-here ] [ distance myself ] ] ] ]
+  [
+    if (agent-benefit self) <= pressure
+    [ move-to min-one-of patches with [ not any? turtles-here ] [ distance myself ] ]
+  ]
 end
 
 ; Agents who are not able to withstand pressure change their begavior.
 to potentially-changing-behavior
   ask turtles
-  [ ifelse ( count turtles in-radius 1.5 = 1 )
-    [ if ( effort <= pressure )
-      [ ifelse color = orange
-        [ set color blue
-          set contribution 0 ]
-        [ set color orange
-          set contribution effort ] ] ]
-    [ ifelse ( contribution = effort )
-      [ if ( synergy * effort * count turtles in-radius 1.5 with [ contribution = effort ] /
-          count turtles in-radius 1.5 <= pressure )
-        [ set color blue
-          set contribution 0 ] ]
-      [ if ( effort + synergy * effort * count turtles in-radius 1.5 with [ contribution = effort ] /
-          count turtles in-radius 1.5 <= pressure )
-        [ set color orange
-          set contribution effort ] ] ] ]
+  [
+    if (agent-benefit self) <= pressure
+    [ toggle-behavior ]
+  ]
 end
 
 ; Update global variables.
@@ -74,7 +64,27 @@ to update-globals
   set percent-of-contributors count turtles with [ contribution = effort ] / count turtles * 100
 end
 
+to-report agent-benefit [turtle1]
+  let groupSize count turtles in-radius 1.5
+  let contributorCount count turtles in-radius 1.5 with [ contribution = effort ]
+  ifelse ( groupSize = 1 )
+  [ report effort ]
+  [ ifelse (contribution = effort)
+    [ report synergy * effort * contributorCount / groupSize ]
+    [ report effort + synergy * effort * contributorCount / groupSize ]
+  ]
+end
+
+to toggle-behavior
+   ifelse color = orange
+   [ set color blue
+     set contribution 0 ]
+   [ set color orange
+     set contribution effort ]
+end
+
 ; Copyright 2021 Garry Sotnik, Thaddeus Shannon, and Wayne Wakeland
+; Modifications 2022 by Christopher Corbell
 ; See end of Info tab for full copyright and license.
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -668,7 +678,7 @@ false
 Polygon -7500403 true true 270 75 225 30 30 225 75 270
 Polygon -7500403 true true 30 75 75 30 270 225 225 270
 @#$#@#$#@
-NetLogo 6.2.0
+NetLogo 6.2.2
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
