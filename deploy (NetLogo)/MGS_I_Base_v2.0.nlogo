@@ -3,7 +3,12 @@
 ; General variables.
 globals
 [ percent-of-contributors     ; The current percent of agents that are contributors.
-  effort]                    ; Agents need effort to provide prosocial common-pool behavior and withstand pressure. The constant sets a limit to how much prosocial common-pool behavior an agent can contribute in a group and there is a 1:1 relationship between the two.
+  effort ; the amount of effort one agent contributes per tick
+  current-groups ; the current connected graphs of agents based on grid placement; caculated after movement
+  current-group-benefits ; the calculated benefit to each agent in each group; calculated after movement
+  per-tick-move-count ; keep track of how many agents move in a single time interval
+  running-ticks-with-no-moves ; count how many turns in a row groups are stable (no agents move)
+] ; Agents need effort to provide prosocial common-pool behavior and withstand pressure. The constant sets a limit to how much prosocial common-pool behavior an agent can contribute in a group and there is a 1:1 relationship between the two.
 
 ; Agent-specific variables.
 turtles-own
@@ -15,6 +20,8 @@ turtles-own
 to setup
   clear-all
   set effort 1
+  set per-tick-move-count 0
+  set running-ticks-with-no-moves 0
   ask patches
   [ set pcolor black
     if count turtles < ( density * 4 * max-pxcor * max-pycor ) [ sprout 1 [set size 1] ] ] ; Use the number of patches and density to distribute agents.
@@ -32,11 +39,15 @@ end
 
 ; Simulate the sequence of processes, until either the number of contributors reaches 0 or all agents become contributors.
 to go
+  set per-tick-move-count 0
   potentially-moving
+  if large-group-model
+  [ update-groups ]
   potentially-changing-behavior
   update-globals
   if count turtles with [ contribution = effort ] = 0 or
-    count turtles with [ contribution = effort ] = count turtles
+    count turtles with [ contribution = effort ] = count turtles or
+  running-ticks-with-no-moves >= 50
     [ stop ]
   tick
 end
@@ -49,7 +60,10 @@ to potentially-moving
     [
       ; randomly move 1 square away if benefit <= pressure
       if (agent-benefit self) <= pressure
-      [ move-to min-one-of patches with [ not any? turtles-here ] [ distance myself ] ]
+      [
+        move-to min-one-of patches with [ not any? turtles-here ] [ distance myself ]
+        set per-tick-move-count (per-tick-move-count + 1)
+      ]
     ]
     [
       ; movement is motivated by group formation based on finding neighbors
@@ -71,7 +85,10 @@ to potentially-moving
           ; find the best potential group based on average local prosociality
           let best-space (patch-group-match adjacent-spaces self)
           if best-space != nobody
-          [ move-to best-space ]
+          [
+            move-to best-space
+            set per-tick-move-count (per-tick-move-count + 1)
+          ]
         ]
       ]
     ]
@@ -103,16 +120,30 @@ end
 ; Update global variables.
 to update-globals
   set percent-of-contributors count turtles with [ contribution = effort ] / count turtles * 100
+  ifelse per-tick-move-count > 0
+  [ set running-ticks-with-no-moves 0 ]
+  [ set running-ticks-with-no-moves (running-ticks-with-no-moves + 1) ]
+end
+
+; Update groups
+to update-groups
+
 end
 
 to-report agent-benefit [turtle1]
-  let groupSize count turtles in-radius 1.5
-  let contributorCount count turtles in-radius 1.5 with [ contribution = effort ]
-  ifelse ( groupSize = 1 )
-  [ report effort ]
-  [ ifelse (is-contributing self)
-    [ report synergy * effort * contributorCount / groupSize ]
-    [ report effort + synergy * effort * contributorCount / groupSize ]
+  ifelse large-group-model
+  [ ; large-group-model: benefits are distributed from all contributors to all members in the connected graph of agents
+
+  ]
+  [ ; original groups: benefits only come from the Moore neighborhood adjacent to the receiving agent
+    let groupSize count turtles in-radius 1.5
+    let contributorCount count turtles in-radius 1.5 with [ contribution = effort ]
+    ifelse ( groupSize = 1 )
+    [ report effort ]
+    [ ifelse (is-contributing self)
+      [ report synergy * effort * contributorCount / groupSize ]
+      [ report effort + synergy * effort * contributorCount / groupSize ]
+    ]
   ]
 end
 
@@ -183,13 +214,13 @@ end
 GRAPHICS-WINDOW
 640
 11
-1025
-397
+1157
+529
 -1
 -1
-17.9524
+10.0
 1
-10
+9
 1
 1
 1
@@ -197,10 +228,10 @@ GRAPHICS-WINDOW
 1
 1
 1
--10
-10
--10
-10
+-25
+25
+-25
+25
 0
 0
 1
@@ -216,7 +247,7 @@ density
 density
 0
 1
-0.3
+0.5
 .1
 1
 NIL
@@ -231,7 +262,7 @@ initial-percent-of-contributors
 initial-percent-of-contributors
 0
 100
-10.0
+3.0
 1
 1
 %
@@ -330,7 +361,7 @@ synergy
 synergy
 0
 10
-4.7
+2.5
 .1
 1
 NIL
@@ -345,7 +376,7 @@ pressure
 pressure
 0
 10
-3.8
+1.2
 .1
 1
 NIL
@@ -400,6 +431,17 @@ group-choice
 group-choice
 "random" "prosocial-similar"
 1
+
+SWITCH
+16
+363
+198
+396
+large-group-model
+large-group-model
+1
+1
+-1000
 
 @#$#@#$#@
 ## WHAT IS IT?
