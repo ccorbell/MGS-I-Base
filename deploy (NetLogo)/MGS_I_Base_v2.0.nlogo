@@ -41,12 +41,40 @@ to go
   tick
 end
 
-; Agents who are not able to withstand pressure move to one of the closest spots.
+; Movement is either random based on pressure, or deliberate for group formation
 to potentially-moving
   ask turtles
   [
-    if (agent-benefit self) <= pressure
-    [ move-to min-one-of patches with [ not any? turtles-here ] [ distance myself ] ]
+    ifelse (group-choice = "random")
+    [
+      ; randomly move 1 square away if benefit <= pressure
+      if (agent-benefit self) <= pressure
+      [ move-to min-one-of patches with [ not any? turtles-here ] [ distance myself ] ]
+    ]
+    [
+      ; movement is motivated by group formation based on finding neighbors
+      ; with average prosocial preferences similar to one's own
+      let groupSize count turtles in-radius 1.5
+
+      ; agents not in a group will always seek one;
+      ; agents already in a group may seek a new one if benefit <= pressure
+      let seekGroup (groupSize <= 1)
+      if (agent-benefit self) <= pressure
+      [ set seekGroup true ]
+
+      if seekGroup
+      [
+         ; find all adjacent empty patches
+        let adjacent-spaces neighbors with [ not any? turtles-here ]
+        if any? adjacent-spaces
+        [
+          ; find the best potential group based on average local prosociality
+          let best-space (patch-group-match adjacent-spaces self)
+          if best-space != nobody
+          [ move-to best-space ]
+        ]
+      ]
+    ]
   ]
 end
 
@@ -88,12 +116,50 @@ to-report agent-benefit [turtle1]
   ]
 end
 
+
 to-report prosocial-bias [turtle1]
   ; map individual prosociality from range [-2, 2] to unit bias range [0.1, 0.9]
   let individualBias (prosociality + 2.5) / 5.0
 
   ; for now individual bias is all we use; later we'll add group influence
   report individualBias
+end
+
+to-report patch-group-match [empty-patches turtle1]
+  ; For each unoccupied empty patch we look at the average
+  ; prosocial preference, and then look at its delta from
+  ; our agent's prosocial preference. We choose the location
+  ; where this delta is minimized as the best group postion.
+  let bestAverage -1
+  let bestMatchPatch nobody
+  let matchValue [prosociality] of turtle1
+  ask empty-patches
+  [
+    ; get average of prosocial preference among neighbors here
+    let nearby-turtles turtles-on neighbors
+    if count nearby-turtles > 1 [
+      let prefAverage mean [prosociality] of nearby-turtles
+      let prefDiff abs(matchValue - prefAverage)
+      ifelse matchValue = -1
+      [
+        set bestMatchPatch self
+        set bestAverage prefAverage
+      ]
+      [
+        let bestDiff abs(matchValue - bestAverage)
+        if prefDiff < bestDiff
+        [
+          ; found a better match
+          set bestMatchPatch self
+          set bestAverage prefAverage
+        ]
+      ]
+    ]
+  ]
+  ; if we didn't find a best match, pick an empty space at random
+  if nobody = bestMatchPatch
+  [ set bestMatchPatch one-of empty-patches ]
+  report bestMatchPatch
 end
 
 to-report is-contributing [turtle1]
@@ -150,7 +216,7 @@ density
 density
 0
 1
-0.6
+0.3
 .1
 1
 NIL
@@ -165,7 +231,7 @@ initial-percent-of-contributors
 initial-percent-of-contributors
 0
 100
-20.0
+10.0
 1
 1
 %
@@ -264,7 +330,7 @@ synergy
 synergy
 0
 10
-2.0
+4.7
 .1
 1
 NIL
@@ -279,7 +345,7 @@ pressure
 pressure
 0
 10
-3.5
+3.8
 .1
 1
 NIL
@@ -324,6 +390,16 @@ use-behavior-bias
 0
 1
 -1000
+
+CHOOSER
+17
+300
+197
+345
+group-choice
+group-choice
+"random" "prosocial-similar"
+1
 
 @#$#@#$#@
 ## WHAT IS IT?
