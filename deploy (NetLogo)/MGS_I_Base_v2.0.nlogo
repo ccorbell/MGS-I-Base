@@ -4,29 +4,40 @@
 globals
 [ percent-of-contributors     ; The current percent of agents that are contributors.
   effort ; the amount of effort one agent contributes per tick
-  current-groups ; the current connected graphs of agents based on grid placement; caculated after movement
-  current-group-benefits ; the calculated benefit to each agent in each group; calculated after movement
+  current-group-count ; the number of current groups (connected graphs of agents), calcualted after movement
+  current-group-benefits ; list of calculated benefit to each agent in each group; calculated after movement
+
   per-tick-move-count ; keep track of how many agents move in a single time interval
+  per-tick-change-count ; keep track of how many agents change behavior in a single time interval
   running-ticks-with-no-moves ; count how many turns in a row groups are stable (no agents move)
+  running-ticks-with-no-behavior-changes; count how many turns in a row no agents change behavior
+  running-ticks-stable
+  stable-breakout
 ] ; Agents need effort to provide prosocial common-pool behavior and withstand pressure. The constant sets a limit to how much prosocial common-pool behavior an agent can contribute in a group and there is a 1:1 relationship between the two.
 
 ; Agent-specific variables.
 turtles-own
 [ contribution ; A dynamic categorical (effort or 0) variable indicating the amount an agent contributes to a group.
   prosociality ; A integer from -2 to 2; 0 is neutral, 2 is strong-prosocial, -2 is strong-non-prosocial
+  group-number ; An common integer assigned to turtles in a connected graph after every move phase; -1 means unassigned
 ]
 
 ; Initialize the model with the parameter settings in the user interface.
 to setup
   clear-all
   set effort 1
+  set stable-breakout 100
   set per-tick-move-count 0
+  set per-tick-change-count 0
   set running-ticks-with-no-moves 0
+  set running-ticks-with-no-behavior-changes 0
+  set running-ticks-stable 0
   ask patches
   [ set pcolor black
     if count turtles < ( density * 4 * max-pxcor * max-pycor ) [ sprout 1 [set size 1] ] ] ; Use the number of patches and density to distribute agents.
   ask turtles
   [ set prosociality (random 5) - 2 ; for now we just have uniform distrution across prosocial preference range
+    set group-number 0
     ifelse count turtles with [ contribution = effort ] < ( initial-percent-of-contributors / 100 * count turtles ) ; Use the initial percent of contributors to assign initial agent type.
     [ set color orange
       set contribution effort ]
@@ -40,6 +51,7 @@ end
 ; Simulate the sequence of processes, until either the number of contributors reaches 0 or all agents become contributors.
 to go
   set per-tick-move-count 0
+  set per-tick-change-count 0
   potentially-moving
   if large-group-model
   [ update-groups ]
@@ -47,7 +59,7 @@ to go
   update-globals
   if count turtles with [ contribution = effort ] = 0 or
     count turtles with [ contribution = effort ] = count turtles or
-  running-ticks-with-no-moves >= 50
+    running-ticks-stable >= stable-breakout
     [ stop ]
   tick
 end
@@ -74,7 +86,7 @@ to potentially-moving
       ; agents already in a group may seek a new one if benefit <= pressure
       let seekGroup (groupSize <= 1)
       if (agent-benefit self) <= pressure
-      [ set seekGroup true ]
+        [ set seekGroup true ]
 
       if seekGroup
       [
@@ -109,9 +121,9 @@ to potentially-changing-behavior
           set probability (1.0 - probability)
         ]
         if random-float 1 < probability
-        [ toggle-behavior ]
+          [ toggle-behavior ]
       ]
-      ; not probabistic - always toggle under pressure:
+      ; else not probabistic - always toggle under pressure:
       [ toggle-behavior ]
     ]
   ]
@@ -120,33 +132,82 @@ end
 ; Update global variables.
 to update-globals
   set percent-of-contributors count turtles with [ contribution = effort ] / count turtles * 100
+
   ifelse per-tick-move-count > 0
   [ set running-ticks-with-no-moves 0 ]
   [ set running-ticks-with-no-moves (running-ticks-with-no-moves + 1) ]
+
+  ifelse per-tick-change-count > 0
+  [ set running-ticks-with-no-behavior-changes 0 ]
+  [ set running-ticks-with-no-behavior-changes (running-ticks-with-no-behavior-changes + 1)]
+
+  set running-ticks-stable min list running-ticks-with-no-moves running-ticks-with-no-behavior-changes
 end
 
 ; Update groups
 to update-groups
+  set current-group-count 0 ; reset global group-count
+  set current-group-benefits []
+  ask turtles [ set group-number -1 ]
+  let group-index 0
+  ask turtles
+  [
+    if group-number < 0
+    [
+      tag-group group-index ; this call recurses into all adjacent turtles
+      set group-index (group-index + 1)
+    ]
+  ]
+  set current-group-count group-index ; save new global group-count
+  set current-group-benefits n-values current-group-count group-benefit
+end
 
+to tag-group [group-index]
+  set group-number group-index
+  ask turtles-on neighbors
+  [
+   if group-number < 0 ; don't recurse into tagging the same turtle twice
+    [ tag-group group-index ]
+  ]
+end
+
+to-report group-benefit [index]
+  let contributorCount count turtles with [group-number = index and contribution = effort]
+  ifelse contributorCount = 0
+  [ report 0 ]
+  [
+    let groupSize count turtles with [group-number = index]
+    report synergy * effort * contributorCount / groupSize
+  ]
 end
 
 to-report agent-benefit [turtle1]
+  let benefit 0
   ifelse large-group-model
   [ ; large-group-model: benefits are distributed from all contributors to all members in the connected graph of agents
-
-  ]
-  [ ; original groups: benefits only come from the Moore neighborhood adjacent to the receiving agent
-    let groupSize count turtles in-radius 1.5
-    let contributorCount count turtles in-radius 1.5 with [ contribution = effort ]
-    ifelse ( groupSize = 1 )
-    [ report effort ]
-    [ ifelse (is-contributing self)
-      [ report synergy * effort * contributorCount / groupSize ]
-      [ report effort + synergy * effort * contributorCount / groupSize ]
+    ask turtle1
+    [
+      let groupBenefit group-benefit group-number
+      ifelse (is-contributing self)
+      [ set benefit groupBenefit ]
+      [ set benefit effort + groupBenefit ]
     ]
   ]
+  [ ; original groups: benefits only come from the Moore neighborhood adjacent to the receiving agent
+    ask turtle1
+    [
+      let groupSize count turtles in-radius 1.5
+      let contributorCount count turtles in-radius 1.5 with [ contribution = effort ]
+      ifelse ( groupSize = 1 )
+      [ set benefit effort ]
+      [ ifelse (is-contributing self)
+        [ set benefit synergy * effort * contributorCount / groupSize ]
+        [ set benefit effort + synergy * effort * contributorCount / groupSize ]
+      ]
+    ]
+  ]
+  report benefit
 end
-
 
 to-report prosocial-bias [turtle1]
   ; map individual prosociality from range [-2, 2] to unit bias range [0.1, 0.9]
@@ -158,9 +219,9 @@ end
 
 to-report patch-group-match [empty-patches turtle1]
   ; For each unoccupied empty patch we look at the average
-  ; prosocial preference, and then look at its delta from
+  ; prosocial preference of neighbors, and then look at its delta from
   ; our agent's prosocial preference. We choose the location
-  ; where this delta is minimized as the best group postion.
+  ; where this delta is minimized as the preferred group postion.
   let bestAverage -1
   let bestMatchPatch nobody
   let matchValue [prosociality] of turtle1
@@ -194,9 +255,14 @@ to-report patch-group-match [empty-patches turtle1]
 end
 
 to-report is-contributing [turtle1]
-  ifelse contribution = effort
-  [ report true ]
-  [ report false ]
+  let result false
+  ask turtle1
+  [
+    ifelse contribution = effort
+    [ set result true ]
+    [ set result false ]
+  ]
+  report result
 end
 
 to toggle-behavior
@@ -205,6 +271,7 @@ to toggle-behavior
      set contribution 0 ]
    [ set color orange
      set contribution effort ]
+  set per-tick-change-count (per-tick-change-count + 1)
 end
 
 ; Copyright 2021 Garry Sotnik, Thaddeus Shannon, and Wayne Wakeland
@@ -214,8 +281,8 @@ end
 GRAPHICS-WINDOW
 640
 11
-1157
-529
+1158
+530
 -1
 -1
 10.0
@@ -247,7 +314,7 @@ density
 density
 0
 1
-0.5
+0.7
 .1
 1
 NIL
@@ -262,7 +329,7 @@ initial-percent-of-contributors
 initial-percent-of-contributors
 0
 100
-3.0
+25.0
 1
 1
 %
@@ -361,7 +428,7 @@ synergy
 synergy
 0
 10
-2.5
+1.9
 .1
 1
 NIL
@@ -376,7 +443,7 @@ pressure
 pressure
 0
 10
-1.2
+3.1
 .1
 1
 NIL
@@ -439,7 +506,7 @@ SWITCH
 396
 large-group-model
 large-group-model
-1
+0
 1
 -1000
 
