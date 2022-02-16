@@ -86,9 +86,13 @@ to potentially-moving
       ; with average prosocial preferences similar to one's own
       let groupSize count turtles in-radius 1.5
 
-      ; agents not in a group will always seek one;
-      ; agents already in a group may seek a new one if benefit <= pressure
-      let seekGroup (groupSize <= 1)
+      ; agents not in a group will always seek one if 'loners-are-restless' is true.
+      ; any agent will move if benefit <= pressure
+
+      let seekGroup false
+      if (groupSize <= 1 and loners-are-restless)
+        [ set seekGroup true ]
+
       if (agent-benefit self) <= pressure
         [ set seekGroup true ]
 
@@ -207,10 +211,14 @@ to-report agent-benefit [turtle1]
   [ ; large-group-model: benefits are distributed from all contributors to all members in the connected graph of agents
     ask turtle1
     [
-      let groupBenefit group-benefit group-number
-      ifelse (is-contributing self)
-      [ set benefit groupBenefit ]
-      [ set benefit effort + groupBenefit ]
+      ifelse count turtles-on neighbors < 1
+      [ set benefit effort ]
+      [
+        let groupBenefit group-benefit group-number
+        ifelse (is-contributing self)
+          [ set benefit groupBenefit ]
+          [ set benefit effort + groupBenefit ]
+      ]
       set debug-benefit benefit
     ]
   ]
@@ -574,6 +582,17 @@ cohesion
 1
 NIL
 HORIZONTAL
+
+SWITCH
+208
+312
+386
+345
+loners-are-restless
+loners-are-restless
+1
+1
+-1000
 
 @#$#@#$#@
 ## WHAT IS IT?
