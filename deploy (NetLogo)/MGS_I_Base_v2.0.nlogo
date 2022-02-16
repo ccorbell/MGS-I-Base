@@ -2,35 +2,41 @@
 
 ; General variables.
 globals
-[ percent-of-contributors     ; The current percent of agents that are contributors.
-  effort ; the amount of effort one agent contributes per tick
-  current-group-count ; the number of current groups (connected graphs of agents), calcualted after movement
-  current-group-benefits ; list of calculated benefit to each agent in each group; calculated after movement
+[ percent-of-contributors   ; the current percent of agents that are contributors.
+  effort                    ; the amount of effort one agent contributes per tick
+
+  current-group-count       ; the number of current groups (connected graphs of agents), calcualted after movement
+  current-group-benefits    ; list of calculated benefit to each agent in each group; calculated after movement
 
   current-group-influences ; prosociality influences from the group
 
-  per-tick-move-count ; keep track of how many agents move in a single time interval
-  per-tick-change-count ; keep track of how many agents change behavior in a single time interval
+  per-tick-move-count      ; keep track of how many agents move in a single time interval
+  per-tick-change-count    ; keep track of how many agents change behavior in a single time interval
+  stable-breakout          ; if we are stable for this many ticks, stop the run
+  ; transient globals to support stable-breakout behavior:
   running-ticks-with-no-moves ; count how many turns in a row groups are stable (no agents move)
   running-ticks-with-no-behavior-changes; count how many turns in a row no agents change behavior
-  running-ticks-stable
-  stable-breakout
-] ; Agents need effort to provide prosocial common-pool behavior and withstand pressure. The constant sets a limit to how much prosocial common-pool behavior an agent can contribute in a group and there is a 1:1 relationship between the two.
+  running-ticks-stable; min of *no-moves, *no-behavior-changes tick counters
+
+] ; Agents need effort to provide prosocial common-pool behavior and withstand pressure.
+  ; The constant sets a limit to how much prosocial common-pool behavior an agent can contribute
+  ; in a group and there is a 1:1 relationship between the two.
 
 ; Agent-specific variables.
 turtles-own
-[ contribution ; A dynamic categorical (effort or 0) variable indicating the amount an agent contributes to a group.
-  prosociality ; A integer from -2 to 2; 0 is neutral, 2 is strong-prosocial, -2 is strong-non-prosocial
-  group-number ; An common integer assigned to turtles in a connected graph after every move phase; -1 means unassigned
+[ contribution      ; A dynamic categorical (effort or 0) variable indicating the amount an agent contributes to a group.
+  prosociality      ; A integer from -2 to 2; 0 is neutral, 2 is strong-prosocial, -2 is strong-non-prosocial
+  group-number      ; An common integer assigned to turtles in a connected graph after every move phase; -1 means unassigned
+
   debug-probability ; For debugging - the last behavior-change probabiity this turtle had
-  debug-benefit ; For debugging - the last calculated total benefit this turtle received
+  debug-benefit     ; For debugging - the last calculated total benefit this turtle received
 ]
 
 ; Initialize the model with the parameter settings in the user interface.
 to setup
   clear-all
   set effort 1
-  set stable-breakout 100
+  set stable-breakout 100 ; if system is stable for this many ticks, end
   set per-tick-move-count 0
   set per-tick-change-count 0
   set running-ticks-with-no-moves 0
@@ -38,21 +44,31 @@ to setup
   set running-ticks-stable 0
   ask patches
   [ set pcolor black
-    if count turtles < ( density * 4 * max-pxcor * max-pycor ) [ sprout 1 [set size 1] ] ] ; Use the number of patches and density to distribute agents.
+    if count turtles < ( density * 4 * max-pxcor * max-pycor )
+    [ sprout 1 [set size 1] ] ; Use the number of patches and density to distribute agents.
+  ]
   ask turtles
   [ set prosociality (random 5) - 2 ; for now we just have uniform distrution across prosocial preference range
     set group-number 0
-    ifelse count turtles with [ contribution = effort ] < ( initial-percent-of-contributors / 100 * count turtles ) ; Use the initial percent of contributors to assign initial agent type.
+
+    ; Use the initial percent of contributors to assign initial agent type.
+    ifelse count turtles with [ contribution = effort ] < ( initial-percent-of-contributors / 100 * count turtles )
     [ set color orange
       set contribution effort ]
     [ set color blue
       set contribution 0 ] ]
+
   set-default-shape turtles "square"
   set percent-of-contributors (count turtles with [contribution = effort]  / count turtles) * 100
   reset-ticks
 end
 
-; Simulate the sequence of processes, until either the number of contributors reaches 0 or all agents become contributors.
+; Simulate the sequence of processes
+; The process will end if one of these happens:
+; - number of contributors reaches 0
+; - number of contributors reaches all agents
+; - system is stable (no moves or behavior changes) for stable-breakout ticks
+; - if max-ticks > 0, we end when ticks reaches max-ticks
 to go
   set per-tick-move-count 0
   set per-tick-change-count 0
@@ -61,7 +77,9 @@ to go
   [ update-groups ]
   potentially-changing-behavior
   update-globals
-  if count turtles with [ contribution = effort ] = 0 or
+  let runComplete max-ticks > 0 and ticks >= max-ticks
+  if runComplete or
+    count turtles with [ contribution = effort ] = 0 or
     count turtles with [ contribution = effort ] = count turtles or
     running-ticks-stable >= stable-breakout
     [ stop ]
@@ -122,18 +140,19 @@ to potentially-changing-behavior
     set debug-probability 0
     if (agent-benefit self) <= pressure
     [
-      ifelse use-behavior-bias [
+      ifelse use-behavior-bias
+      [
         ; pressure is sufficient, but decision to change behavior depends on prosocial bias
         let probability (prosocial-bias self)
         if (is-contributing self)
         [ ; invert probability to represent likelihood of becoming non-contributor
           set probability (1.0 - probability)
         ]
-        set debug-probability probability
+        set debug-probability probability ; for debugging / verifying
         if random-float 1 < probability
           [ toggle-behavior ]
       ]
-      ; else not probabistic - always toggle under pressure:
+      ; else, original behavior, not probabistic - always toggle under pressure:
       [ toggle-behavior ]
     ]
   ]
@@ -143,14 +162,17 @@ end
 to update-globals
   set percent-of-contributors count turtles with [ contribution = effort ] / count turtles * 100
 
+  ; moves increment per-tick-move-count - if its 0, increment running-ticks-with-no-moves
   ifelse per-tick-move-count > 0
   [ set running-ticks-with-no-moves 0 ]
   [ set running-ticks-with-no-moves (running-ticks-with-no-moves + 1) ]
 
+  ; sim. for per-tick-change-count
   ifelse per-tick-change-count > 0
   [ set running-ticks-with-no-behavior-changes 0 ]
   [ set running-ticks-with-no-behavior-changes (running-ticks-with-no-behavior-changes + 1)]
 
+  ; set running-ticks-stable to the number of running ticks with neither move nor behavior change
   set running-ticks-stable min list running-ticks-with-no-moves running-ticks-with-no-behavior-changes
 end
 
@@ -171,16 +193,18 @@ to update-groups
   set current-group-count group-index ; save new global group-count
   set current-group-benefits n-values current-group-count group-benefit
 
+  ; if we are using group-social-influence, determine it for all groups here
   if group-social-influence
   [ update-group-social-influence ]
 end
 
 to update-group-social-influence
   set current-group-influences []
+  ; use group-influence reporter create list of group influence values
   set current-group-influences n-values current-group-count group-influence
 end
 
-to tag-group [group-index]
+to tag-group [group-index] ; recursive turtle method to tag self and neighbors with group number
   set group-number group-index
   ask turtles-on neighbors
   [
@@ -212,12 +236,12 @@ to-report agent-benefit [turtle1]
     ask turtle1
     [
       ifelse count turtles-on neighbors < 1
-      [ set benefit effort ]
+      [ set benefit effort ] ; solo agents always just retain effort
       [
         let groupBenefit group-benefit group-number
         ifelse (is-contributing self)
-          [ set benefit groupBenefit ]
-          [ set benefit effort + groupBenefit ]
+          [ set benefit groupBenefit ] ; contributors get only the group benefit
+          [ set benefit effort + groupBenefit ] ; non-contributors also retain their own effort
       ]
       set debug-benefit benefit
     ]
@@ -250,14 +274,15 @@ to-report prosocial-bias [turtle1]
     if group-social-influence
     [
       ; our group will further influence our bias
+
+      ; read L from the current-group-influences list
       let L item group-number current-group-influences
       if L != 0
       [
-        let C cohesion
-        let B 1.0
+        let C cohesion ; parameter
         ifelse L > 0
-        [ set totalBias (P + L * C) / (1 + L * C) ]
-        [ set totalBias P / (1 + abs(L * C)) ]
+        [ set totalBias (P + L * C) / (1 + L * C) ] ; average bias againt L*C perfect contributors
+        [ set totalBias P / (1 + abs(L * C)) ] ; average bias against L*C perfect non-contributors
       ]
     ]
   ]
@@ -269,12 +294,16 @@ to-report patch-group-match [empty-patches turtle1]
   ; prosocial preference of neighbors, and then look at its delta from
   ; our agent's prosocial preference. We choose the location
   ; where this delta is minimized as the preferred group postion.
+
   let bestAverage -1
   let bestMatchPatch nobody
   let matchValue [prosociality] of turtle1
   ask empty-patches
   [
     ; get average of prosocial preference among neighbors here
+
+    ; TODO this average may include self at current position, perhaps it should not?
+
     let nearby-turtles turtles-on neighbors
     if count nearby-turtles > 1 [
       let prefAverage mean [prosociality] of nearby-turtles
@@ -526,10 +555,10 @@ ticks
 11
 
 SWITCH
-17
-252
-198
-285
+15
+245
+196
+278
 use-behavior-bias
 use-behavior-bias
 0
@@ -537,20 +566,20 @@ use-behavior-bias
 -1000
 
 CHOOSER
-17
-300
-197
-345
+16
+294
+196
+339
 group-choice
 group-choice
 "random" "prosocial-similar"
 1
 
 SWITCH
-16
-363
-198
-396
+18
+395
+200
+428
 large-group-model
 large-group-model
 0
@@ -558,10 +587,10 @@ large-group-model
 -1000
 
 SWITCH
-15
-419
-216
-452
+16
+447
+217
+480
 group-social-influence
 group-social-influence
 0
@@ -569,30 +598,62 @@ group-social-influence
 -1000
 
 SLIDER
-15
-461
-187
-494
+14
+484
+186
+517
 cohesion
 cohesion
 0
 5
-1.5
+2.0
 0.1
 1
 NIL
 HORIZONTAL
 
 SWITCH
-208
-312
-386
-345
+16
+343
+194
+376
 loners-are-restless
 loners-are-restless
-1
+0
 1
 -1000
+
+INPUTBOX
+477
+292
+626
+352
+max-ticks
+10000.0
+1
+0
+Number
+
+TEXTBOX
+477
+358
+627
+386
+Set max-ticks to zero to run indefinitely
+11
+0.0
+1
+
+MONITOR
+223
+292
+392
+337
+percent-of-contributors 
+precision percent-of-contributors 1
+17
+1
+11
 
 @#$#@#$#@
 ## WHAT IS IT?
