@@ -7,6 +7,8 @@ globals
   current-group-count ; the number of current groups (connected graphs of agents), calcualted after movement
   current-group-benefits ; list of calculated benefit to each agent in each group; calculated after movement
 
+  current-group-influences ; prosociality influences from the group
+
   per-tick-move-count ; keep track of how many agents move in a single time interval
   per-tick-change-count ; keep track of how many agents change behavior in a single time interval
   running-ticks-with-no-moves ; count how many turns in a row groups are stable (no agents move)
@@ -20,6 +22,8 @@ turtles-own
 [ contribution ; A dynamic categorical (effort or 0) variable indicating the amount an agent contributes to a group.
   prosociality ; A integer from -2 to 2; 0 is neutral, 2 is strong-prosocial, -2 is strong-non-prosocial
   group-number ; An common integer assigned to turtles in a connected graph after every move phase; -1 means unassigned
+  debug-probability ; For debugging - the last behavior-change probabiity this turtle had
+  debug-benefit ; For debugging - the last calculated total benefit this turtle received
 ]
 
 ; Initialize the model with the parameter settings in the user interface.
@@ -111,6 +115,7 @@ end
 to potentially-changing-behavior
   ask turtles
   [
+    set debug-probability 0
     if (agent-benefit self) <= pressure
     [
       ifelse use-behavior-bias [
@@ -120,6 +125,7 @@ to potentially-changing-behavior
         [ ; invert probability to represent likelihood of becoming non-contributor
           set probability (1.0 - probability)
         ]
+        set debug-probability probability
         if random-float 1 < probability
           [ toggle-behavior ]
       ]
@@ -160,6 +166,14 @@ to update-groups
   ]
   set current-group-count group-index ; save new global group-count
   set current-group-benefits n-values current-group-count group-benefit
+
+  if group-social-influence
+  [ update-group-social-influence ]
+end
+
+to update-group-social-influence
+  set current-group-influences []
+  set current-group-influences n-values current-group-count group-influence
 end
 
 to tag-group [group-index]
@@ -181,6 +195,12 @@ to-report group-benefit [index]
   ]
 end
 
+to-report group-influence [index]
+  let strongProsocialCount count turtles with [group-number = index and prosociality = 2]
+  let strongAntisocialCount count turtles with [group-number = index and prosociality = -2]
+  report strongProsocialCount - strongAntisocialCount
+end
+
 to-report agent-benefit [turtle1]
   let benefit 0
   ifelse large-group-model
@@ -191,6 +211,7 @@ to-report agent-benefit [turtle1]
       ifelse (is-contributing self)
       [ set benefit groupBenefit ]
       [ set benefit effort + groupBenefit ]
+      set debug-benefit benefit
     ]
   ]
   [ ; original groups: benefits only come from the Moore neighborhood adjacent to the receiving agent
@@ -204,6 +225,7 @@ to-report agent-benefit [turtle1]
         [ set benefit synergy * effort * contributorCount / groupSize ]
         [ set benefit effort + synergy * effort * contributorCount / groupSize ]
       ]
+      set debug-benefit benefit
     ]
   ]
   report benefit
@@ -211,10 +233,27 @@ end
 
 to-report prosocial-bias [turtle1]
   ; map individual prosociality from range [-2, 2] to unit bias range [0.1, 0.9]
-  let individualBias (prosociality + 2.5) / 5.0
-
-  ; for now individual bias is all we use; later we'll add group influence
-  report individualBias
+  ; also apply group influence if applicable
+  let totalBias 0
+  ask turtle1
+  [
+    let P (prosociality + 2.5) / 5.0
+    set totalBias P
+    if group-social-influence
+    [
+      ; our group will further influence our bias
+      let L item group-number current-group-influences
+      if L != 0
+      [
+        let C cohesion
+        let B 1.0
+        ifelse L > 0
+        [ set totalBias (P + L * C) / (1 + L * C) ]
+        [ set totalBias P / (1 + abs(L * C)) ]
+      ]
+    ]
+  ]
+  report totalBias
 end
 
 to-report patch-group-match [empty-patches turtle1]
@@ -279,9 +318,9 @@ end
 ; See end of Info tab for full copyright and license.
 @#$#@#$#@
 GRAPHICS-WINDOW
-640
+634
 11
-1158
+1152
 530
 -1
 -1
@@ -312,9 +351,9 @@ SLIDER
 46
 density
 density
-0
+0.1
 1
-0.7
+0.2
 .1
 1
 NIL
@@ -329,7 +368,7 @@ initial-percent-of-contributors
 initial-percent-of-contributors
 0
 100
-25.0
+30.0
 1
 1
 %
@@ -428,7 +467,7 @@ synergy
 synergy
 0
 10
-1.9
+4.5
 .1
 1
 NIL
@@ -443,7 +482,7 @@ pressure
 pressure
 0
 10
-3.1
+2.0
 .1
 1
 NIL
@@ -509,6 +548,32 @@ large-group-model
 0
 1
 -1000
+
+SWITCH
+15
+419
+216
+452
+group-social-influence
+group-social-influence
+0
+1
+-1000
+
+SLIDER
+15
+461
+187
+494
+cohesion
+cohesion
+0
+5
+1.5
+0.1
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
