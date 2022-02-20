@@ -28,8 +28,16 @@ turtles-own
   prosociality      ; A integer from -2 to 2; 0 is neutral, 2 is strong-prosocial, -2 is strong-non-prosocial
   group-number      ; An common integer assigned to turtles in a connected graph after every move phase; -1 means unassigned
 
+  next-move         ; The patch this turtle will move to next; used to coordinate simultaenous movement
+
   debug-probability ; For debugging - the last behavior-change probabiity this turtle had
   debug-benefit     ; For debugging - the last calculated total benefit this turtle received
+
+]
+
+patches-own
+[
+ reserved ; a turtle has reserved this for movement on this tick, so other turtles cannot plan to move there
 ]
 
 ; Initialize the model with the parameter settings in the user interface.
@@ -42,14 +50,17 @@ to setup
   set running-ticks-with-no-moves 0
   set running-ticks-with-no-behavior-changes 0
   set running-ticks-stable 0
+  set current-group-influences []
   ask patches
   [ set pcolor black
+    set reserved false
     if count turtles < ( density * 4 * max-pxcor * max-pycor )
     [ sprout 1 [set size 1] ] ; Use the number of patches and density to distribute agents.
   ]
   ask turtles
   [ set prosociality (random 5) - 2 ; for now we just have uniform distrution across prosocial preference range
     set group-number 0
+    set next-move nobody
 
     ; Use the initial percent of contributors to assign initial agent type.
     ifelse count turtles with [ contribution = effort ] < ( initial-percent-of-contributors / 100 * count turtles )
@@ -117,18 +128,30 @@ to potentially-moving
       if seekGroup
       [
          ; find all adjacent empty patches
-        let adjacent-spaces neighbors with [ not any? turtles-here ]
+        let adjacent-spaces neighbors with [ not reserved and not any? turtles-here ]
         if any? adjacent-spaces
         [
           ; find the best potential group based on average local prosociality
           let best-space (patch-group-match adjacent-spaces self)
           if best-space != nobody
           [
-            move-to best-space
-            set per-tick-move-count (per-tick-move-count + 1)
+            ask best-space
+            [ set reserved true ]
+            set next-move best-space
           ]
         ]
       ]
+    ]
+  ]
+  ; now we actuall execute all simultaneous moves
+  ask turtles
+  [
+    if not (nobody = next-move)
+    [ move-to next-move
+      ask next-move
+      [ set reserved false ]
+      set next-move nobody
+      set per-tick-move-count (per-tick-move-count + 1)
     ]
   ]
 end
@@ -160,7 +183,7 @@ end
 
 ; Update global variables.
 to update-globals
-  set percent-of-contributors count turtles with [ contribution = effort ] / count turtles * 100
+  set percent-of-contributors percent-contributing
 
   ; moves increment per-tick-move-count - if its 0, increment running-ticks-with-no-moves
   ifelse per-tick-move-count > 0
@@ -174,6 +197,10 @@ to update-globals
 
   ; set running-ticks-stable to the number of running ticks with neither move nor behavior change
   set running-ticks-stable min list running-ticks-with-no-moves running-ticks-with-no-behavior-changes
+end
+
+to-report percent-contributing
+  report count turtles with [ contribution = effort ] / count turtles * 100
 end
 
 ; Update groups
@@ -350,6 +377,64 @@ to toggle-behavior
   set per-tick-change-count (per-tick-change-count + 1)
 end
 
+to-report group-size [index]
+  report count turtles with [group-number = index]
+end
+
+to-report average-prosocial-group-size
+  let group-index 0
+  let group-count 0
+  let turtle-count 0
+  foreach current-group-influences
+  [
+    value ->
+      if value > 0 [
+        set turtle-count turtle-count + group-size group-index
+        set group-count group-count + 1
+      ]
+      set group-index group-index + 1
+  ]
+  ifelse group-count = 0
+  [ report 0 ]
+  [ report turtle-count / group-count ]
+end
+
+to-report average-neutral-group-size
+  let group-index 0
+  let group-count 0
+  let turtle-count 0
+  foreach current-group-influences
+  [
+    value ->
+      if value = 0 [
+        set turtle-count turtle-count + group-size group-index
+        set group-count group-count + 1
+      ]
+      set group-index group-index + 1
+  ]
+  ifelse group-count = 0
+  [ report 0 ]
+  [ report turtle-count / group-count ]
+end
+
+to-report average-antiprosocial-group-size
+  let group-index 0
+  let group-count 0
+  let turtle-count 0
+  foreach current-group-influences
+  [
+    value ->
+      if value < 0 [
+        set turtle-count turtle-count + group-size group-index
+        set group-count group-count + 1
+      ]
+      set group-index group-index + 1
+  ]
+  ifelse group-count = 0
+  [ report 0 ]
+  [ report turtle-count / group-count ]
+end
+
 ; Copyright 2021 Garry Sotnik, Thaddeus Shannon, and Wayne Wakeland
 ; Modifications 2022 by Christopher Corbell
 ; See end of Info tab for full copyright and license.
@@ -357,11 +442,11 @@ end
 GRAPHICS-WINDOW
 634
 11
-1152
-530
+1264
+642
 -1
 -1
-10.0
+15.171
 1
 9
 1
@@ -371,10 +456,10 @@ GRAPHICS-WINDOW
 1
 1
 1
--25
-25
--25
-25
+-20
+20
+-20
+20
 0
 0
 1
@@ -391,7 +476,7 @@ density
 0.1
 1
 0.2
-.1
+.05
 1
 NIL
 HORIZONTAL
@@ -405,7 +490,7 @@ initial-percent-of-contributors
 initial-percent-of-contributors
 0
 100
-30.0
+50.0
 1
 1
 %
@@ -463,10 +548,10 @@ NIL
 0
 
 MONITOR
-225
-238
-306
-283
+222
+482
+303
+527
 # of agents
 count turtles
 17
@@ -474,10 +559,10 @@ count turtles
 11
 
 MONITOR
-323
-238
-421
-283
+320
+482
+418
+527
 # of contributors
 count turtles with [ color = orange ]
 17
@@ -485,10 +570,10 @@ count turtles with [ color = orange ]
 11
 
 MONITOR
-438
-237
-556
-282
+435
+481
+553
+526
 # of non-contributors
 count turtles with [ color = blue ]
 17
@@ -504,7 +589,7 @@ synergy
 synergy
 0
 10
-4.5
+8.9
 .1
 1
 NIL
@@ -519,7 +604,7 @@ pressure
 pressure
 0
 10
-2.0
+4.0
 .1
 1
 NIL
@@ -529,7 +614,7 @@ PLOT
 225
 12
 625
-226
+160
 Contributors
 ticks
 % of population
@@ -544,10 +629,10 @@ PENS
 "default" 1.0 0 -955883 true "" "plot percent-of-contributors"
 
 MONITOR
-570
-236
-627
-281
+567
+480
+624
+525
 ticks
 ticks
 17
@@ -606,7 +691,7 @@ cohesion
 cohesion
 0
 5
-2.0
+1.5
 0.1
 1
 NIL
@@ -624,36 +709,154 @@ loners-are-restless
 -1000
 
 INPUTBOX
-477
-292
-626
-352
+474
+536
+623
+596
 max-ticks
-10000.0
+500.0
 1
 0
 Number
 
 TEXTBOX
-477
-358
-627
-386
+474
+602
+624
+630
 Set max-ticks to zero to run indefinitely
 11
 0.0
 1
 
 MONITOR
-223
-292
-392
-337
+220
+536
+389
+581
 percent-of-contributors 
 precision percent-of-contributors 1
 17
 1
 11
+
+MONITOR
+220
+588
+306
+633
+# of groups
+current-group-count
+17
+1
+11
+
+MONITOR
+241
+638
+354
+683
+# prosocial groups
+length filter [i -> i > 0] current-group-influences
+1
+1
+11
+
+MONITOR
+357
+638
+459
+683
+# neutral groups
+length filter [i -> i = 0] current-group-influences
+1
+1
+11
+
+MONITOR
+462
+638
+603
+683
+# anti-prosocial groups
+length filter [i -> i < 0] current-group-influences
+1
+1
+11
+
+PLOT
+224
+167
+625
+317
+Groups by Influence Type
+ticks
+groups
+0.0
+10.0
+0.0
+10.0
+true
+true
+"" ""
+PENS
+"Prosocial" 1.0 0 -955883 true "" "plot length filter [i -> i > 0] current-group-influences"
+"Neutral" 1.0 0 -4539718 true "" "plot length filter [i -> i = 0] current-group-influences"
+"Anti-prosocial" 1.0 0 -13345367 true "" "plot length filter [i -> i < 0] current-group-influences"
+"Total" 1.0 0 -16777216 true "" "plot current-group-count"
+
+MONITOR
+29
+530
+186
+575
+Avg Prosocial Group Size
+average-prosocial-group-size
+2
+1
+11
+
+MONITOR
+30
+583
+186
+628
+Avg Neutral Group Size
+average-neutral-group-size
+2
+1
+11
+
+MONITOR
+31
+633
+186
+678
+Avg Anti Group Size
+average-antiprosocial-group-size
+2
+1
+11
+
+PLOT
+224
+324
+624
+474
+Average Group Size By Type
+ticks
+group size
+0.0
+10.0
+0.0
+10.0
+true
+true
+"" ""
+PENS
+"Neutral" 1.0 0 -5987164 true "" "plot average-neutral-group-size"
+"Prosocial" 1.0 0 -955883 true "" "plot average-prosocial-group-size"
+"Anti-prosocial" 1.0 0 -13345367 true "" "plot average-antiprosocial-group-size"
 
 @#$#@#$#@
 ## WHAT IS IT?
@@ -1050,6 +1253,200 @@ NetLogo 6.2.2
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
+<experiments>
+  <experiment name="synergy-sweep-with-influence" repetitions="1" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <metric>percent-contributing</metric>
+    <metric>current-group-count</metric>
+    <metric>running-ticks-stable</metric>
+    <enumeratedValueSet variable="density">
+      <value value="0.25"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="use-behavior-bias">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="group-choice">
+      <value value="&quot;prosocial-similar&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="group-social-influence">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="synergy">
+      <value value="1"/>
+      <value value="2"/>
+      <value value="2.9"/>
+      <value value="3"/>
+      <value value="3.1"/>
+      <value value="4"/>
+      <value value="5"/>
+      <value value="6"/>
+      <value value="7"/>
+      <value value="10"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="large-group-model">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="pressure">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="cohesion">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="initial-percent-of-contributors">
+      <value value="30"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="max-ticks">
+      <value value="500"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="loners-are-restless">
+      <value value="true"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="synergy-sweep-without-influence" repetitions="1" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <metric>percent-contributing</metric>
+    <metric>current-group-count</metric>
+    <metric>running-ticks-stable</metric>
+    <enumeratedValueSet variable="density">
+      <value value="0.2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="use-behavior-bias">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="group-choice">
+      <value value="&quot;prosocial-similar&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="group-social-influence">
+      <value value="false"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="synergy">
+      <value value="1"/>
+      <value value="2"/>
+      <value value="2.9"/>
+      <value value="3"/>
+      <value value="3.1"/>
+      <value value="4"/>
+      <value value="5"/>
+      <value value="6"/>
+      <value value="7"/>
+      <value value="10"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="large-group-model">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="pressure">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="cohesion">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="initial-percent-of-contributors">
+      <value value="30"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="max-ticks">
+      <value value="500"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="loners-are-restless">
+      <value value="true"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="pressure-sweep-with-influence" repetitions="1" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <metric>percent-contributing</metric>
+    <metric>current-group-count</metric>
+    <metric>running-ticks-stable</metric>
+    <enumeratedValueSet variable="density">
+      <value value="0.2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="use-behavior-bias">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="group-choice">
+      <value value="&quot;prosocial-similar&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="group-social-influence">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="synergy">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="large-group-model">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="pressure">
+      <value value="1.5"/>
+      <value value="2"/>
+      <value value="2.5"/>
+      <value value="3"/>
+      <value value="3.5"/>
+      <value value="4"/>
+      <value value="4.5"/>
+      <value value="5"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="cohesion">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="initial-percent-of-contributors">
+      <value value="30"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="max-ticks">
+      <value value="500"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="loners-are-restless">
+      <value value="true"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="pressure-sweep-without-influence" repetitions="1" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <metric>percent-contributing</metric>
+    <metric>current-group-count</metric>
+    <metric>running-ticks-stable</metric>
+    <enumeratedValueSet variable="density">
+      <value value="0.2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="use-behavior-bias">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="group-choice">
+      <value value="&quot;prosocial-similar&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="group-social-influence">
+      <value value="false"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="synergy">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="large-group-model">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="pressure">
+      <value value="1.5"/>
+      <value value="2"/>
+      <value value="2.5"/>
+      <value value="3"/>
+      <value value="3.5"/>
+      <value value="4"/>
+      <value value="4.5"/>
+      <value value="5"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="cohesion">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="initial-percent-of-contributors">
+      <value value="30"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="max-ticks">
+      <value value="500"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="loners-are-restless">
+      <value value="true"/>
+    </enumeratedValueSet>
+  </experiment>
+</experiments>
 @#$#@#$#@
 @#$#@#$#@
 default
